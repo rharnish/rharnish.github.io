@@ -1,0 +1,122 @@
+---
+title: "Curl Quality For PML"
+author: "rharnish"
+date: "February 21, 2015"
+output: html_document
+---
+
+## Summary
+
+The goal of this analysis was to apply methods learned in the Coursera Practical Machine Learing (PML) course to predict whether participants in a weightlifting study performed barbell lifts with proper technique, or with one of several classes of improper technique. The analysis includes a discussion of how the model was built, how cross validation was used, and what the expected out of sample error was. 
+
+We applied the R caret package's Random Forest algorithm to build a predictive model from a training set that consisted of ~30% of the available data (that had been trimmed of largely empty columns), and tested the model on the remaining ~70% of the data. Our out of sample error estimate was ~2%.
+
+## Data 
+
+The data consisted of measurements that came from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. More information is available from the following website: <http://groupware.les.inf.puc-rio.br/har> 
+
+In the section below, the data is read into data frames. One for training and initial cross validation, and the second for prediction and submission.
+
+```{r}
+# set path to data dir and files
+dataDir <- "/Users/rharnish/Desktop/PracticalMachineLearning/Project/"
+trainingFile <- paste(dataDir, "pml-training.csv", sep="")
+predictFile  <- paste(dataDir, "pml-testing.csv" , sep="")
+
+# read the data into frames
+untrimmedTrainingData   <- read.csv( trainingFile, header=TRUE )
+untrimmedPredictionData <- read.csv( predictFile,  header=TRUE )
+```
+
+## Data Cleaning
+
+The first several columns from the training and testing sets consist of information related more to study organization than to actual measurement, so we exclude those columns from the data frame used to build the model. We also exclude several columns that are mostly empty or of value "NA".
+
+```{r}
+# load the caret library
+library(caret)
+
+# the first 7 columns look to be for bookeeping, so we exclude them from the data
+# frame that will be used to build the model
+studyAdminCols = 1:7
+untrimmedTrainingData   <- untrimmedTrainingData[,-studyAdminCols]
+untrimmedPredictionData <- untrimmedPredictionData[,-studyAdminCols]
+
+# many columns consist of mostly "" or NA, so we exclude them from the data frame
+# as well
+colSumsNA <- colSums( untrimmedTrainingData == "" | is.na(untrimmedTrainingData) ) 
+nearEmptyCols <- colSumsNA > ( 0.50 * nrow( untrimmedTrainingData ) )
+trimmedTrainingData   <- untrimmedTrainingData[,!nearEmptyCols]
+trimmedPredictionData <- untrimmedPredictionData[,!nearEmptyCols]
+```
+
+## Creation of Training and Test Sets for Cross Validation
+
+To get a good estimate of our out of sample error, we partitioned the data used to generate the model into training and test sets. Here we only use 30% of the data in the training set used to build the model -- to reduce the number of rows in our training data in an effort to reduce the amount of time it takes to build the model.
+
+```{r}
+# partition the training data into training and test sets
+# the training set will be used to build the model, the test
+# set will be used to estimate out of sample error
+inTrain  = createDataPartition(trimmedTrainingData$classe, p = 0.30)[[1]]
+training = trimmedTrainingData[inTrain, ]
+testing  = trimmedTrainingData[-inTrain, ]
+```
+
+## Random Forests for Model Building
+
+The Random Forest algorithm was implemented via the R caret package to generate a model from the training data. We restricted the number of trees to 100 to reduce the amount of time required to build the model
+
+```{r}
+# set an initial seed value for the RNG
+set.seed(0)
+
+Sys.time() # time before building model
+# fit the training data using random forest algorithm to generate fit model
+modFit <- train(classe~ .,data=training,method="rf",prox=TRUE, ntrees=100)
+Sys.time() # time after building model
+
+
+
+# print(modFit$finalModel)
+modFit
+save(modFit, file = paste(dataDir, "modFit.RData", sep=""))
+```
+
+## Cross Validation and Error Estimate
+
+We use the model developed on the training partition of the data (modFit) to generate a set of predictions on the testing partition, then use the known values of the testing partition to assess the accuracy and out of sample error we will expect to see.
+
+```{r}
+# use the model to generate predictions for the
+# testing set and display the confusion matrix
+testingPredict <- predict(modFit,testing)
+confusionMatrix(testingPredict, testing$classe)
+
+# get accuracy from postResample and use it to compute the 
+# out of sample error
+postResampleStats <- postResample(testingPredict, testing$classe)
+accuracy <- postResampleStats[[1]]
+oosError <- 1 - accuracy
+```
+
+### accuracy
+```{r}
+# accuracy:
+accuracy
+```
+
+### out of sample error
+```{r}
+# out of sample error:
+oosError
+```
+
+## Predictions
+
+Use the random forest model to generate a set of predictions for the testing data. The results are saved to a variable that will be used to generate submission files for the PML course.
+
+```{r}
+results <- predict(modFit, trimmedPredictionData)
+save(results, file = paste(dataDir, "results.RData", sep=""))
+``` 
